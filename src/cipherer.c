@@ -165,15 +165,26 @@ enum
 	PAD_ZEROS,
 	PAD_PKCS7,
 	PAD_ANSI_X923,
-	PAD_IEC_9797_1,
+	PAD_ISO_9797_1,
 };
 typedef struct
 {
 	int mode;
 	int padding;
 	uint8_t temp[16];
+	int noncelen;
 } aes_ctx_params_t;
 
+static void advance_ctr_ctx(aes_ctx_params_t* ctx)
+{
+	int carry = 1;
+	for (int i = 15; i > ctx->noncelen - 1; i--)
+	{
+		int s = ctx->temp[i] + carry;
+		ctx->temp[i] = (s > 0xff) ? (s - 0x100) : s;
+		carry = s > 0xff;
+	}
+}
 static void encrypt_ctx(const aes_key_t* key, aes_ctx_params_t* ctx, uint8_t plain[16], uint8_t cipher[16])
 {
 	if (ctx->mode == MODE_ECB)
@@ -212,7 +223,7 @@ static void encrypt_ctx(const aes_key_t* key, aes_ctx_params_t* ctx, uint8_t pla
 		aes_encrypt_block(ctx->temp, key, cipher);
 		for (int i = 0; i < 16; i++)
 			cipher[i] ^= plain[i];
-		(*((uint64_t*)ctx->temp))++;
+		advance_ctr_ctx(ctx);
 	}
 }
 static void decrypt_ctx(const aes_key_t* key, aes_ctx_params_t* ctx, uint8_t cipher[16], uint8_t plain[16])
@@ -253,7 +264,7 @@ static void decrypt_ctx(const aes_key_t* key, aes_ctx_params_t* ctx, uint8_t cip
 		aes_encrypt_block(ctx->temp, key, plain);
 		for (int i = 0; i < 16; i++)
 			plain[i] ^= cipher[i];
-		(*((uint64_t*)ctx->temp))++;
+		advance_ctr_ctx(ctx);
 	}
 }
 
@@ -268,7 +279,7 @@ static void insert_padding(int pad, const uint8_t plain[16], int leftlen, uint8_
 		memset(output + leftlen, 0, 16 - leftlen);
 		output[15] = 16 - leftlen;
 	}
-	else if (pad == PAD_IEC_9797_1)
+	else if (pad == PAD_ISO_9797_1)
 	{
 		output[leftlen] = 0x80;
 		memset(output + leftlen + 1, 0, 15 - leftlen);
@@ -290,7 +301,7 @@ static int extract_padding(int pad, const uint8_t padded[16], uint8_t output[16]
 		if (padsize > 16) return 1;
 		*leftlen = 16 - padsize;
 	}
-	else if (pad == PAD_IEC_9797_1)
+	else if (pad == PAD_ISO_9797_1)
 	{
 		int found = 0;
 		for (int i = 15; i >= 0; i--)
@@ -314,7 +325,7 @@ static int process_text(const aes_key_t* key, aes_ctx_params_t* ctx, const arg_p
 
 	if (args[ARG_ENCRYPT].presented)
 	{
-		while (len > 16)
+		while (len >= 16)
 		{
 			memcpy(buf, text, 16);
 			encrypt_ctx(key, ctx, buf, outbuf);
@@ -446,20 +457,29 @@ static void print_aes_ctx_params(const aes_ctx_params_t* params)
 	case PAD_ZEROS: padding = "Zeros"; break;
 	case PAD_PKCS7: padding = "PKCS-7"; break;
 	case PAD_ANSI_X923: padding = "ANSI X.923"; break;
-	case PAD_IEC_9797_1: padding = "ISO/IEC 9797-1"; break;
+	case PAD_ISO_9797_1: padding = "ISO/IEC 9797-1"; break;
 	}
 	if (params->mode != MODE_ECB)
 	{
 		printf("Mode: %s\nPadding: %s\nIV: ", mode, padding);
-		for (int i = 0; i < 16; i++)
-			printf("%02x", params->temp[i]);
+		for (int i = 0; i < 16 - params->noncelen; i++)
+			printf("%02x", params->temp[params->noncelen + i]);
 		putchar('\n');
+
+		if (params->mode == MODE_CTR)
+		{
+			printf("Nonce: ");
+			for (int i = 0; i < params->noncelen; i++)
+				printf("%02x", params->temp[i]);
+		}
 	}
 	else
 		printf("Mode: ECB\nPadding: %s\n", padding);
 }
 static int generate_aes_ctx_params(aes_ctx_params_t* params, const arg_param_t* args)
 {
+	params->noncelen = 0;
+
 	if (args[ARG_MODE].presented)
 	{
 		const char* modename = args[ARG_MODE].option;
@@ -479,7 +499,7 @@ static int generate_aes_ctx_params(aes_ctx_params_t* params, const arg_param_t* 
 		if (!strcmp(padname, "zeros") || !strcmp(padname, "0")) params->padding = PAD_ZEROS;
 		else if (!strcmp(padname, "pkcs7") || !strcmp(padname, "7")) params->padding = PAD_PKCS7;
 		else if (!strcmp(padname, "ansi-x923") || !strcmp(padname, "923")) params->padding = PAD_ANSI_X923;
-		else if (!strcmp(padname, "iec-9797-1") || !strcmp(padname, "9797")) params->padding = PAD_IEC_9797_1;
+		else if (!strcmp(padname, "iec-9797-1") || !strcmp(padname, "9797")) params->padding = PAD_ISO_9797_1;
 		else { printf("Undefined padding: %s\n", padname); return 1; }
 	}
 	else params->padding = PAD_ZEROS;
@@ -493,6 +513,24 @@ static int generate_aes_ctx_params(aes_ctx_params_t* params, const arg_param_t* 
 		else
 		{
 			printf("In all modes except ECB, IV is required. (In CTR mode IV is considered a counter). Use -I, --initvec\n");
+			return 1;
+		}
+	}
+
+	if (params->mode == MODE_CTR)
+	{
+		memset(params->temp, 0, 16);
+		if (args[ARG_NONCE].presented && args[ARG_NONCELEN].presented)
+		{
+			params->noncelen = atoi(args[ARG_NONCELEN].option);
+			if (params->noncelen < 0 || params->noncelen > 16) return 1;
+			if (read_hex_string(params->temp, args[ARG_NONCE].option, params->noncelen)) return 1;
+			if (read_hex_string(params->temp + params->noncelen, args[ARG_INITVEC].option, 16 - params->noncelen))
+				return 1;
+		}
+		else
+		{
+			printf("For CTR mode: nonce (-N, --nonce), nonce length (-n, --noncelen), must be specified\n");
 			return 1;
 		}
 	}

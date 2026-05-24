@@ -1,3 +1,10 @@
+# Visual Studio
+.vs
+bin
+*.slnx
+*.vcxproj
+*.vcxproj.*
+
 # Prerequisites
 *.d
 

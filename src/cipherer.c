@@ -471,6 +471,7 @@ static void print_aes_ctx_params(const aes_ctx_params_t* params)
 			printf("Nonce: ");
 			for (int i = 0; i < params->noncelen; i++)
 				printf("%02x", params->temp[i]);
+			putchar('\n');
 		}
 	}
 	else

@@ -20,7 +20,7 @@ static int print_help(const char* progname)
 		"\t-p, --passphrase\tNon-hex (textual) representation of the key (requires -s)\n"
 		"\t-H, --hash\t\tUse SHA-256 hash of passphrase instead of it directly\n"
 		"\t-s, --size\t\tSpecify key size manually: [128, 192, 256]\n"
-		"\t-m, --mode\t\tSpecify AES mode of operation:\n"
+		"\t-m, --mode\t\tSpecify block cipher mode of operation:\n"
 		"\t\tecb\t\t\tElectronic Codebook (does not require -I)\n"
 		"\t\tcbc\t\t\tCipher Block Chaining\n"
 		"\t\tpcbc\t\t\tPropagating cipher block chaining\n"
@@ -28,9 +28,10 @@ static int print_help(const char* progname)
 		"\t\tofb\t\t\tOutput Feedback\n"
 		"\t\tctr\t\t\tCounter Mode\n"
 		"\t-I, --initvec\t\tSet initial vector (mandatory for all modes except ECB), in hex\n"
-		"\t\t\t\t(in CTR should be considered as initial counter value, big-endian)\n"
-		"\t-N, --nonce\t\tNonce for CTR mode\n"
-		"\t-n, --noncelen\t\tNonce length for CTR mode (int bytes) (the rest will be considred a counter)\n"
+		"\t\t\t\t\t(in CTR should be considered a nonce)\n"
+		"\t-n, --nonce\t\tSpecify nonce length for CTR mode (in bytes)\n"
+		"\t\t\t\t\t(the rest of IV will be considred a counter)\n"
+		"\t-c, --counter\t\tSpecify counter for CTR mode\n"
 		"\t-P, --pad\t\tSpecify padding:\n"
 		"\t\tzeros (0)\t\tZeros\n"
 		"\t\tpkcs7 (7)\t\tPKCS-7\n"
@@ -101,7 +102,7 @@ static int validate_args(arg_param_t* args)
 
 int process(const arg_param_t* args);
 
-void __test__();
+// void __test__();
 
 int main(int argc, char** argv)
 {
@@ -119,8 +120,8 @@ int main(int argc, char** argv)
 		[ARG_SIZE] =		{ "size",		's', 1 },
 		[ARG_MODE] =		{ "mode",		'm', 1 },
 		[ARG_INITVEC] =		{ "initvec",	'I', 1 },
-		[ARG_NONCE] =		{ "nonce",		'N', 1 },
-		[ARG_NONCELEN] =	{ "noncelen",	'n', 1 },
+		[ARG_NONCE] =		{ "nonce",		'n', 1 },
+		[ARG_COUNTER] =		{ "counter",	'c', 1 },
 		[ARG_PADDING] =		{ "pad",		'P', 1 },
 		[ARG_SECRET] =		{ "secret",		'S', 0 },
 	};

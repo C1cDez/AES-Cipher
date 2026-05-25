@@ -172,13 +172,13 @@ typedef struct
 	int mode;
 	int padding;
 	uint8_t temp[16];
-	int noncelen;
+	int nonce;
 } aes_ctx_params_t;
 
 static void advance_ctr_ctx(aes_ctx_params_t* ctx)
 {
 	int carry = 1;
-	for (int i = 15; i > ctx->noncelen - 1; i--)
+	for (int i = 15; i > ctx->nonce - 1; i--)
 	{
 		int s = ctx->temp[i] + carry;
 		ctx->temp[i] = (s > 0xff) ? (s - 0x100) : s;
@@ -459,28 +459,27 @@ static void print_aes_ctx_params(const aes_ctx_params_t* params)
 	case PAD_ANSI_X923: padding = "ANSI X.923"; break;
 	case PAD_ISO_9797_1: padding = "ISO/IEC 9797-1"; break;
 	}
-	if (params->mode != MODE_ECB)
+
+	if (params->mode == MODE_CTR)
+	{
+		printf("Mode: CTR\nPadding: %s\n", padding);
+		printf("Nonce: ");
+		for (int i = 0; i < params->nonce; i++) printf("%02x", params->temp[i]);
+		putchar('\n');
+		printf("Counter: ");
+		for (int i = params->nonce; i < 16; i++) printf("%02x", params->temp[i]);
+		putchar('\n');
+	}
+	else if (params->mode != MODE_ECB)
 	{
 		printf("Mode: %s\nPadding: %s\nIV: ", mode, padding);
-		for (int i = 0; i < 16 - params->noncelen; i++)
-			printf("%02x", params->temp[params->noncelen + i]);
+		for (int i = 0; i < 16; i++) printf("%02x", params->temp[i]);
 		putchar('\n');
-
-		if (params->mode == MODE_CTR)
-		{
-			printf("Nonce: ");
-			for (int i = 0; i < params->noncelen; i++)
-				printf("%02x", params->temp[i]);
-			putchar('\n');
-		}
 	}
-	else
-		printf("Mode: ECB\nPadding: %s\n", padding);
+	else printf("Mode: ECB\nPadding: %s\n", padding);
 }
 static int generate_aes_ctx_params(aes_ctx_params_t* params, const arg_param_t* args)
 {
-	params->noncelen = 0;
-
 	if (args[ARG_MODE].presented)
 	{
 		const char* modename = args[ARG_MODE].option;
@@ -513,26 +512,23 @@ static int generate_aes_ctx_params(aes_ctx_params_t* params, const arg_param_t* 
 		}
 		else
 		{
-			printf("In all modes except ECB, IV is required. (In CTR mode IV is considered a counter). Use -I, --initvec\n");
+			printf("In all modes except ECB, IV is required. Use -I, --initvec\n");
 			return 1;
 		}
 	}
 
 	if (params->mode == MODE_CTR)
 	{
-		memset(params->temp, 0, 16);
-		if (args[ARG_NONCE].presented && args[ARG_NONCELEN].presented)
+		params->nonce = args[ARG_NONCE].presented ? atoi(args[ARG_NONCE].option) : 12;
+		if (params->nonce < 0 || params->nonce > 15)
 		{
-			params->noncelen = atoi(args[ARG_NONCELEN].option);
-			if (params->noncelen < 0 || params->noncelen > 16) return 1;
-			if (read_hex_string(params->temp, args[ARG_NONCE].option, params->noncelen)) return 1;
-			if (read_hex_string(params->temp + params->noncelen, args[ARG_INITVEC].option, 16 - params->noncelen))
-				return 1;
-		}
-		else
-		{
-			printf("For CTR mode: nonce (-N, --nonce), nonce length (-n, --noncelen), must be specified\n");
+			printf("Nonce length must be [0; 15] bytes, but %d is given\n", params->nonce);
 			return 1;
+		}
+		if (args[ARG_COUNTER].presented)
+		{
+			if (read_hex_string(params->temp + params->nonce, args[ARG_COUNTER].option, 16 - params->nonce))
+				return 1;
 		}
 	}
 
@@ -553,12 +549,12 @@ int process(const arg_param_t* args)
 
 	if (!args[ARG_SECRET].presented)
 	{
-		printf("Key was successfully derived: ");
+		printf("Key: ");
 		for (int i = 0; i < (key.type & 0x3f); i++) printf("%02x", key.content.bytes[i]);
 		putchar('\n');
 	}
 	
-	aes_ctx_params_t aes_ctx = { .mode = 0, .padding = 0, .temp = { 0 } };
+	aes_ctx_params_t aes_ctx = { .mode = 0, .padding = 0, .temp = { 0 }, .nonce = 0 };
 	if (generate_aes_ctx_params(&aes_ctx, args))
 	{
 		printf("Failed to generate cipher spec\n");
